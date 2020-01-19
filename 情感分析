@@ -79,4 +79,3 @@ def print_comment(category,num):
 
 print_comment("low",2)
 print_comment("high",2)
-
