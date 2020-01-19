@@ -1,0 +1,98 @@
+# 情感分析
+(一)基于情感词典方法
+(二)基于机器学习方法
+    2.1 语料库预处理
+    2.2 支持向量机
+    2.3 朴素贝叶斯
+    2.4 Xgboost
+(三)基于深度学习方法
+    3.1 语料库预处理
+      3.1.1 语料库标签化tokensize 
+      3.1.2 构建Embedding Matrix
+      3.1.3 训练集与测试集构建
+    3.2 模型训练
+    3.3 模型预测
+    
+
+## (一)基于情感词典方法的情感分析
+import pandas as pd
+# 加载情感词典（Boson情感词典）
+df = pd.read_table("BosonNLP_sentiment_score.txt",sep= " ",names=['key','score'])
+key = df['key'].values.tolist()
+score = df['score'].values.tolist()
+
+# 导入经过预处理的分词结果
+df_comments = pd.read_table("分词结果.txt",encoding="utf-8",header=None)
+df_comments.columns=["content"]
+df_comments
+
+# 计算得分函数
+def sen_scores(words):
+    sum_score = 0
+    for word in words:
+        if word in key:
+            word_score = score[key.index(word)]
+            sum_score = word_score + sum_score
+    return sum_score
+
+# 合并得分
+def scores(comments):
+    words=[]
+    score_list=[]
+    count=0
+    for comment in comments:   
+        words = comment.split(" ")
+        score_list.append(round(sen_scores(words),3))
+        # 打印动态进度条
+        count = count+1
+        charm_num = count // int(len(df_comments)/100)
+        if charm_num in range(1,101):
+            print("\r"+"进度：{0}{1}%".format('*'*charm_num ,charm_num), end='')
+    df_comments["scores"]=score_list
+    return df_comments
+# 计算得分(需要几分钟的时间)
+scores(df_comments["content"]) 
+# 图形展示——得分图
+import matplotlib.pyplot as plt
+import numpy as np
+
+plt.figure(figsize=(15,10))
+
+def plotscore(a,b,name_string):
+    x = np.arange(b-a)
+    y = df_comments["scores"][a:b].sort_values()
+    plt.bar(x, y,color='royalblue')
+    plt.ylabel("Score")
+    plt.xlabel("Comments num")
+    plt.title(name_string+"'s Score Distribution")
+    plt.axhline(y=20, color="black", linestyle=":",lw=1.5)
+    plt.axhline(y=20, color="black", linestyle=":",lw=1.5)
+
+# 联想 0-999
+plt.subplot(2,2,1)
+plotscore(0,999,"Lenovo")
+# 小米 1000-1999
+plt.subplot(2,2,2)
+plotscore(1000,1999,"Xiaomi")
+# 苹果 2000-2998
+plt.subplot(2,2,3)
+plotscore(2000,2998,"Apple")
+# 华为 2999-3539
+plt.subplot(2,2,4)
+plotscore(2999,3539,"Huawei")
+
+# 打印分数最高和最低两组评论
+def print_comment(category,num):
+    for i in range(num):
+        if category == "low":
+            category_low = df_comments["scores"].sort_values()[:num]  
+            l = category_low.index[i]
+            print("low"+"["+str(i+1)+"]:"+str(df_comments["scores"][l])+" "+df_comments["content"][l].replace(" ","")+"\n")
+        else:
+            category_high = df_comments["scores"].sort_values()[-num:]  
+            h = category_high.index[i]
+            print("high"+"["+str(i+1)+"]:"+str(df_comments["scores"][h])+" "+df_comments["content"][h].replace(" ","")+"\n")
+
+print_comment("low",2)
+print_comment("high",2)
+
