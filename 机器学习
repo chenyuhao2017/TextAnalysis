@@ -1,0 +1,182 @@
+(二)基于机器学习方法的情感分析
+需要提前安装的包：numpy,pandas,jieba,gensim,sklearn
+1.支持向量机模型
+2.朴素贝叶斯模型
+3.Xgboost模型
+
+import jieba
+import numpy as np
+import pandas as pd
+from string import punctuation
+
+### 2.1 语料库预处理
+# 读入正负面情绪语料库
+neg = pd.read_csv("negtive.csv",header=None)
+pos = pd.read_csv("positive.csv",header=None)
+# 对语料库进行预处理
+# 去除标点函数
+def punc(string):
+    import re
+    from string import punctuation
+    punc = punctuation+u'《》？，！“”#.,;《》？！“”‘’@￥%…&×（）——+【】{};；●。&～、|\s:：'
+    string=re.sub("[{}]".format(punc), "", string) 
+    return string
+pos[0]=pos[0].apply(punc)
+neg[0]=neg[0].apply(punc)
+# jieba分词
+neg["words"] = neg[0].apply(lambda x:jieba.lcut(x))
+pos["words"] = pos[0].apply(lambda x:jieba.lcut(x))
+# 合并正负面分词数组
+x = np.concatenate((pos["words"],neg["words"]))
+# 创建向量空间
+# train_labels = [0 for i in range(5000)]+[1 for i in range(5000)]
+num_one = np.ones(len(pos))
+num_zero = np.zeros(len(neg))
+y = np.concatenate((num_one,num_zero))
+from gensim.models.word2vec import Word2Vec
+
+# w2v = word2vec.Word2Vec(x,size=500, min_count=20) 
+
+# 初始化高维向量空间  200个维度(神经网络的隐藏层的单元数) <30次丢弃
+w2v = Word2Vec(size=200,min_count=30)
+# 创建词汇表
+w2v.build_vocab(x)
+# 训练模型得词向量
+w2v.train(x,total_examples=w2v.corpus_count,epochs=w2v.iter)
+
+# 将句子中的所有词向量相加
+def total_vec(words):
+    vec = np.zeros(200).reshape((1,200))
+    for word in words:
+        try:
+            vec += w2v.wv[word].reshape((1,200))
+        except KeyError:
+            continue
+    return vec
+# 得到最终训练模型数据集
+train_vec = np.concatenate([total_vec(words) for words in x]) 
+vec = np.zeros(200)
+
+
+### 2.2 支持向量机
+from sklearn import svm
+
+# SVM模型初始化
+svm_model = svm.SVC(kernel="rbf")
+# 训练SVM模型(需要几分钟时间)
+svm_model.fit(train_vec,y)
+# 导入经过预处理的分词结果
+comments = pd.read_table("分词结果.txt",header = None)
+comments.columns=["content"]
+# SVM模型预测
+comment_sentiment=[]
+for comment in comments["content"]:
+    words = comment.split(" ")
+    words_vec = total_vec(words)
+    result = svm_model.predict(words_vec)
+    comment_sentiment.append("积极" if result[0]==1 else "消极")
+comments["svm_sentiment"]= comment_sentiment
+comments
+### 2.3 朴素贝叶斯
+from sklearn.naive_bayes import GaussianNB
+# 高斯贝叶斯模型
+bayes_model = GaussianNB()#默认priors=None
+bayes_model.fit(train_vec, y)
+# bayes模型
+comment_sentiment_bayes=[]
+for comment in comments["content"]:
+    words = comment.split(" ")
+    words_vec = total_vec(words)
+    result = bayes_model.predict(words_vec)
+    comment_sentiment_bayes.append("积极" if int(result[0]) else "消极")
+comments["bayes_sentiment"]= comment_sentiment_bayes
+# 打印结果中积极和消极情绪的数量
+def senti_num(modelname,comments):
+    p=0
+    ng=0
+    for senti in comments:
+        if senti == "积极":
+            p = p+1
+        else:
+            ng = ng+1
+    print(modelname+"模型中"+"\n积极情绪的数量为："+ str(p) +"\n消极情绪的数量为："+ str(ng))
+#支持向量机
+senti_num("svm",comments["svm_sentiment"])
+#朴素贝叶斯
+senti_num("bayes",comments["bayes_sentiment"])
+# 情感词典方法与机器学习方法结果合并
+comments["df_scores"]=df_comments["scores"]
+
+score_senti=[]
+for comment in comments["df_scores"]:
+    if float(comment) >= 0:
+        score_senti.append("积极")
+    else:
+        score_senti.append("消极")
+comments["df_score_senti"]=score_senti
+
+# 统计情感词典方法中积极情绪与消极情绪的数量
+senti_num("情感词典",comments["df_score_senti"])
+
+### 2.4Xgboost
+#train_vec,y
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
+
+X_TRAIN,X_test,y_TRAIN,y_test = train_test_split(train_vec,y,test_size = 0.3,random_state = 1)
+X_train,X_val,y_train,y_val = train_test_split(X_TRAIN,y_TRAIN,test_size = 0.2,random_state = 1)
+
+train=xgb.DMatrix( X_train, label=y_train)
+val=xgb.DMatrix( X_val, label=y_val)
+test=xgb.DMatrix( X_test, label=y_test)
+
+params = {
+    'booster': 'gbtree',
+    'objective': 'binary:logistic',
+    'gamma': 0.1,
+    'max_depth': 6,
+    'lambda': 2,
+    'subsample': 0.7,
+    'colsample_bytree': 0.7,
+    'min_child_weight': 3,
+    'silent': 1,
+    'eta': 0.1,
+    'seed': 1000,
+    'nthread': 4,
+}
+plst = params.items()
+
+watchlist = [(val, 'val'), (train, 'train')]
+num_rounds = 50
+booster = xgb.train(plst, train, num_rounds,watchlist)#,evals=watchlist
+ 
+# 计算错误率
+y_predicted = booster.predict(test)
+y_tmp = test.get_label()
+
+TP=0#真正
+FN=0#假反
+FP=0#假正
+TN=0#真反
+
+for a,i in enumerate(y_tmp):
+    if i!=(y_predicted[a]>0.5):
+        if i ==0:
+            FP+=1
+        else:
+            FN+=1
+    else:
+        if i==0:
+            TN+=1
+        else:
+            TP+=1
+accuracy = sum(y_tmp == (y_predicted > 0.5))
+accuracy_rate = float(accuracy) / len(y_predicted)
+Precission=TP/(TP+FP)
+Recall=TP/(TP+FN)
+print ('样本总数：{0}'.format(len(y_predicted)))
+print ('正确数目：{0}'.format(accuracy) )
+print ('正确率：{0:.3f}'.format((accuracy_rate)))
+print ('Precission：{0:.3f}'.format(Precission))
+print ('Recall：{0:.3f}'.format(Recall))
+print('TP:',TP,'FN:',FN,'FP:',FP,'TN:',TN)
